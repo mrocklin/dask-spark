@@ -67,7 +67,7 @@ def _dask_to_spark(client):
                                         workers=[h['address']])
                             for h in hosts.values()]
     sc = pyspark.SparkContext(master)
-    return sc
+    raise gen.Return(sc)
 
 
 def dask_to_spark(client):
