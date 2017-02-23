@@ -2,7 +2,10 @@ import atexit
 from collections import defaultdict
 import logging
 import subprocess
+from time import sleep, time
+from threading import Thread
 
+from distributed import LocalCluster, Client
 from distributed.comm.core import parse_host_port
 from distributed.utils import sync
 from tornado import gen
@@ -68,5 +71,86 @@ def _dask_to_spark(client):
 
 
 def dask_to_spark(client):
-    """ Launch Spark from a Dask cluster """
+    """ Launch Spark Cluster on top of a Dask cluster
+
+    Parameters
+    ----------
+    client: dask.distributed.Client
+
+    Examples
+    --------
+    >>> from dask.distributed import Client  # doctest: +SKIP
+    >>> client = Client('scheduler-address:8786')  # doctest: +SKIP
+    >>> sc = dask_to_spark(client)  # doctest: +SKIP
+
+    See Also
+    --------
+    spark_to_dask
+    """
     return sync(client.loop, _dask_to_spark, client)
+
+
+def start_worker(address):
+    import distributed
+    from distributed import Worker
+    from tornado.ioloop import IOLoop
+
+    if getattr(distributed, 'global_worker', False):
+       return ['already occupied']
+
+    loop = IOLoop.current()
+    w = Worker(address, loop=loop)
+    w.start(0)
+    print("Started worker")
+
+    distributed.global_worker = w
+
+    from tornado import gen
+    @gen.coroutine
+    def _():
+        while w.status != 'closed':
+            yield gen.sleep(0.1)
+    loop.run_sync(_)
+    distributed.global_worker = False
+    return ['completed']
+
+
+def spark_to_dask(sc, loop=None):
+    """ Launch a Dask cluster from a Spark Context
+
+    Parameters
+    ----------
+    sc: pyspark.SparkContext
+
+    Examples
+    --------
+    >>> sc = pyspark.SparkContext('spark://...')  # doctest: +SKIP
+    >>> client = spark_to_dask(sc)  # doctest: +SKIP
+
+    See Also
+    --------
+    dask_to_spark
+    """
+    cluster = LocalCluster(n_workers=0, loop=loop)
+    rdd = sc.parallelize(range(1000))
+
+    address = cluster.scheduler.address
+    start_workers = lambda: rdd.mapPartitions(lambda x: start_worker(address)).count()
+    thread = Thread(target=start_workers)
+    thread.daemon = True
+    thread.start()
+
+    for i in range(1, 1000):
+        if cluster.scheduler.workers:
+            break
+        if i % 100 == 0:
+            print("Waiting for workers")
+            logger.info("Waiting for workers")
+        sleep(0.01)
+        logger.info("%d", i)
+
+    if i == 999:
+        raise TimeoutError("No workers arrived")
+
+    client = Client(cluster, loop=cluster.loop)
+    return client
