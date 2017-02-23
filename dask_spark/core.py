@@ -1,12 +1,10 @@
 import atexit
-from collections import defaultdict
 import logging
 import subprocess
 from time import sleep, time
 from threading import Thread
 
 from distributed import LocalCluster, Client
-from distributed.comm.core import parse_host_port
 from distributed.utils import sync
 from tornado import gen
 import pyspark
@@ -47,7 +45,6 @@ def start_slave(master, cores, memory, dask_worker=None):
 @gen.coroutine
 def _dask_to_spark(client):
     cluster_info = yield client.scheduler.identity()
-    hosts = defaultdict(lambda: {'cores': 0, 'memory': 0})
 
     hosts = {}
     for addr, info in cluster_info['workers'].items():
