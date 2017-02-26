@@ -7,6 +7,10 @@ Launch Dask from Spark and Spark from Dask.  This project is not mature.
 Examples
 --------
 
+::
+
+   pip install dask-spark
+
 Create Spark cluster from a Dask cluster
 
 .. code-block:: python
