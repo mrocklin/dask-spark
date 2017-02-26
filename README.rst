@@ -1,9 +1,7 @@
 Dask-Spark
 ==========
 
-Launch Dask from Spark and Spark from Dask.
-
-This project is very new and experimental.  Do not use.
+Launch Dask from Spark and Spark from Dask.  This project is not mature.
 
 
 Examples
@@ -35,3 +33,28 @@ Create Dask cluster from a Spark cluster
    >>> client = spark_to_dask(sc)
    >>> client
    <Client: scheduler="'tcp://127.0.0.1:8786'">
+
+
+Requirements and How this Works
+-------------------------------
+
+This depends on a relatively recent version of Dask.distributed.
+
+For starting Spark from Dask this assumes that you have Spark installed and
+that the ``start-master.sh`` and ``start-slave.sh`` Spark scripts are available
+on the PATH of the workers.  This starts a long-running Spark master process on
+the Dask Scheduler and starts long running Spark slaves on Dask workers.  There
+will only be one slave per worker.  We set the number of cores and the amount
+of memory to match the Dask workers and available memory.
+
+When starting Dask from Spark this will block the Spark cluster.  We start a
+scheduler on the local machine and then run a long-running function that starts
+up a Dask worker using ``RDD.mapPartitions``.
+
+
+TODO
+----
+
+- [ ] This almost certainly fails in non-trivial situations
+- [ ] Enable user specification of Java flags for memory and core use
+- [ ] Support multiple spark clusters per Dask cluster
