@@ -31,7 +31,7 @@ def start_master(dask_scheduler=None, port=7077):
 def start_slave(master, cores, memory, dask_worker=None):
     proc = subprocess.Popen(['start-slave.sh', master,
                              '--cores', str(cores),
-                             '--memory', str(int(memory)) + 'B'])
+                             '--memory', str(int(memory / 1e6)) + 'M'])
     dask_worker.extensions['spark'] = proc
     logger.info("Start Spark Slave, pointing to %s", master)
 
@@ -43,7 +43,7 @@ def start_slave(master, cores, memory, dask_worker=None):
 
 
 @gen.coroutine
-def _dask_to_spark(client):
+def _dask_to_spark(client, appName='dask-spark', **kwargs):
     cluster_info = yield client.scheduler.identity()
 
     hosts = {}
@@ -63,16 +63,18 @@ def _dask_to_spark(client):
                                         memory=int(h['memory']),
                                         workers=[h['address']])
                             for h in hosts.values()]
-    sc = pyspark.SparkContext(master)
+    sc = pyspark.SparkContext(master, appName=appName, **kwargs)
     raise gen.Return(sc)
 
 
-def dask_to_spark(client):
+def dask_to_spark(client, **kwargs):
     """ Launch Spark Cluster on top of a Dask cluster
 
     Parameters
     ----------
     client: dask.distributed.Client
+    **kwargs: Keywords
+        These get sent to the SparkContext call
 
     Examples
     --------
@@ -84,7 +86,7 @@ def dask_to_spark(client):
     --------
     spark_to_dask
     """
-    return sync(client.loop, _dask_to_spark, client)
+    return sync(client.loop, _dask_to_spark, client, **kwargs)
 
 
 def start_worker(address):
