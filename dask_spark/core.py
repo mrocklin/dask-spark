@@ -1,15 +1,50 @@
 import atexit
 import logging
+import os
+import psutil
 import subprocess
 from time import sleep, time
 from threading import Thread
 
 from distributed import LocalCluster, Client
-from distributed.utils import sync
+from distributed.utils import sync, ignoring
+from toolz import first
 from tornado import gen
 import pyspark
 
 logger = logging.getLogger(__name__)
+
+
+def remove_spark_master():
+    def is_master(proc):
+        return (proc.name() == 'java' and
+                'org.apache.spark.deploy.master.Master' in proc.cmdline())
+
+    for proc in psutil.process_iter():
+        if is_master(proc):
+            proc.terminate()
+
+    while True:
+        if any(map(is_master, psutil.process_iter())):
+            sleep(0.1)
+        else:
+            break
+
+
+def remove_spark_slave():
+    def is_worker(proc):
+        return (proc.name() == 'java' and
+                'org.apache.spark.deploy.worker.Worker' in proc.cmdline())
+
+    for proc in psutil.process_iter():
+        if is_worker(proc):
+            proc.terminate()
+
+    while True:
+        if any(map(is_worker, psutil.process_iter())):
+            sleep(0.1)
+        else:
+            break
 
 
 def start_master(dask_scheduler=None, port=7077):
@@ -21,9 +56,7 @@ def start_master(dask_scheduler=None, port=7077):
     logger.info("Start Spark at %s", master)
     dask_scheduler.extensions['spark'] = proc
 
-    @atexit.register
-    def remove_spark_master():
-        proc.terminate()
+    atexit.register(remove_spark_master)
 
     return master
 
@@ -32,12 +65,11 @@ def start_slave(master, cores, memory, dask_worker=None):
     proc = subprocess.Popen(['start-slave.sh', master,
                              '--cores', str(cores),
                              '--memory', str(int(memory / 1e6)) + 'M'])
-    dask_worker.extensions['spark'] = proc
+    with ignoring(AttributeError):
+        dask_worker.extensions['spark'] = proc
     logger.info("Start Spark Slave, pointing to %s", master)
 
-    @atexit.register
-    def remove_spark_slave():
-        proc.terminate()
+    atexit.register(remove_spark_slave)
 
     return 'OK'
 
@@ -58,10 +90,11 @@ def _dask_to_spark(client, appName='dask-spark', **kwargs):
         raise ValueError("No workers found")
 
     master = yield client._run_on_scheduler(start_master)
+    nanny = 'nanny' in first(cluster_info['workers'].values())['services']
     worker_futures = yield [client._run(start_slave, master,
                                         cores=h['cores'],
                                         memory=int(h['memory']),
-                                        workers=[h['address']])
+                                        workers=[h['address']], nanny=nanny)
                             for h in hosts.values()]
     sc = pyspark.SparkContext(master, appName=appName, **kwargs)
     raise gen.Return(sc)
